@@ -1,7 +1,14 @@
-// main.cpp - WebView2를 사용한 Windows GUI 애플리케이션
-#include <iostream>
-#include <string>
+﻿// main.cpp - WebView2를 사용한 Windows GUI 애플리케이션
 #include <algorithm>
+#include <array>
+#include <string>
+#include <string_view>
+#include <format>
+#include <filesystem>
+#include <iostream>
+
+namespace fs = std::filesystem;
+using namespace std::literals;
 
 #include <windows.h>
 // PathRemoveFileSpecW
@@ -149,20 +156,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 bool InitializeWebView2(HWND hwnd)
 {
 	// UserDataFolder 경로 설정
-	wchar_t exePath[MAX_PATH];
-	GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-	PathRemoveFileSpecW(exePath);
-	std::wstring userDataFolder = std::wstring(exePath) + L"\\WebView2Data";
+	std::wstring exePath;
+	exePath.resize(MAX_PATH);
+	GetModuleFileNameW(nullptr, exePath.data(), MAX_PATH);
+	PathRemoveFileSpecW(exePath.data());
+
+	fs::path userDataFolder = fs::path{ exePath } / L"WebView2Data";
 
 	// WebView2 환경 생성 (비동기)
 	HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr
 		, userDataFolder.c_str()
 		, nullptr
 		, Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-			[hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
-			{
-				return OnWebView2EnvironmentCreated(result, env, hwnd);
-			}
+			[hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT { return OnWebView2EnvironmentCreated(result, env, hwnd); }
 		).Get()
 	);
 
@@ -181,10 +187,7 @@ HRESULT OnWebView2EnvironmentCreated(HRESULT result, ICoreWebView2Environment* e
 	// WebView2 컨트롤러 생성
 	env->CreateCoreWebView2Controller(hwnd
 		, Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-			[hwnd](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT
-			{
-				return OnWebView2ControllerCreated(result, controller, hwnd);
-			}
+			[hwnd](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT { return OnWebView2ControllerCreated(result, controller, hwnd); }
 		).Get()
 	);
 
@@ -216,24 +219,45 @@ HRESULT OnWebView2ControllerCreated(HRESULT result, ICoreWebView2Controller* con
 
 	// JS → C++ 메시지 수신 핸들러 등록
 	g_webview->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-			[](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT
-			{
-				return OnWebMessageReceived(sender, args);
-			}
+			[](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT { return OnWebMessageReceived(sender, args); }
 		).Get()
 		, nullptr
 	);
 
-	// HTML 로드
-	wchar_t exePathLocal[MAX_PATH];
-	GetModuleFileNameW(nullptr, exePathLocal, MAX_PATH);
-	PathRemoveFileSpecW(exePathLocal);
+	// 로컬 폴더를 가상 호스트로 매핑 (CORS 회피)
+	std::wstring exePathLocal;
+	exePathLocal.resize(MAX_PATH);
 
-	std::wstring uri = L"file:///" + std::wstring(exePathLocal) + L"/ui/index.html";
-	std::replace(uri.begin(), uri.end(), L'\\', L'/');
+	GetModuleFileNameW(nullptr, exePathLocal.data(), MAX_PATH);
+	PathRemoveFileSpecW(exePathLocal.data());
 
-	std::wcout << L"로딩 URI: " << uri << std::endl;
-	g_webview->Navigate(uri.c_str());
+	auto uiFolder = std::format(L"{}\\ui", exePathLocal.c_str());
+
+	// ICoreWebView2_3 인터페이스 획득
+	COM_PTR<ICoreWebView2_3> webview3;
+	g_webview->QueryInterface(IID_PPV_ARGS(&webview3));
+
+	if (webview3)
+	{
+		// 가상 호스트 매핑 (woc.app을 로컬 폴더로 매핑)
+		webview3->SetVirtualHostNameToFolderMapping(L"woc.app"
+			, uiFolder.c_str()
+			, COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS
+		);
+
+		// 가상 호스트를 통해 로드
+		std::wstring uri = L"https://woc.app/index.html";
+		std::wcout << L"로딩 URI: " << uri << std::endl;
+		g_webview->Navigate(uri.c_str());
+	}
+	else
+	{
+		MessageBoxW(nullptr
+			, L"WebView2 버전이 너무 낮습니다. 최신 버전으로 업데이트하세요."
+			, L"오류"
+			, MB_ICONERROR
+		);
+	}
 
 	return S_OK;
 }
