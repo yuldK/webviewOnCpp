@@ -4,6 +4,7 @@ set(MSVC_COMMON_FLAGS
     /nologo      # Don't show version info
     /W4          # Enable warning level 4
     /WX          # Enable warning to error
+    /wd4819      # Disable C4819 (코드 페이지 경고)
     /Zc:wchar_t  # Parse wchar_t as internal type
     /MP          # Build with multiple processes
     /Zi          # Use Program Database Binary

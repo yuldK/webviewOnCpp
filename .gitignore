@@ -268,5 +268,7 @@ __pycache__/
 /[Bb]in.*
 /[Bb]in/*
 
-
 /.vscode
+
+package-lock.json
+/ui/dist/*
