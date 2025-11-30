@@ -139,9 +139,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_SIZE:
 		// WebView 크기 조정
 		if (g_webviewController)
-		{
 			ResizeWebView();
-		}
 		return 0;
 
 	case WM_DESTROY:
@@ -209,10 +207,71 @@ HRESULT OnWebView2ControllerCreated(HRESULT result, ICoreWebView2Controller* con
 	// WebView2 설정
 	ICoreWebView2Settings* settings;
 	g_webview->get_Settings(&settings);
+	// JavaScript 실행 활성화
 	settings->put_IsScriptEnabled(TRUE);
+	// C++와 JavaScript 간 메시지 통신 활성화
 	settings->put_IsWebMessageEnabled(TRUE);
-	settings->put_AreDevToolsEnabled(TRUE);
+
+	// 개발자 도구(F12) 활성화
+	BOOL enableDevTools = IsDebuggerPresent();
+	settings->put_AreDevToolsEnabled(enableDevTools);
+
+	// 기본 스크립트 대화상자(alert, confirm, prompt) 활성화
 	settings->put_AreDefaultScriptDialogsEnabled(TRUE);
+
+	// ICoreWebView2Settings4 인터페이스로 추가 설정 (WebView2 버전 1.0.902.49 이상 필요)
+	if (ICoreWebView2Settings4* settings4 = nullptr; SUCCEEDED(settings->QueryInterface(IID_PPV_ARGS(&settings4))))
+	{
+		// 우클릭 컨텍스트 메뉴 비활성화
+		settings4->put_AreDefaultContextMenusEnabled(FALSE);
+		// 공용 단축키 비활성화
+		// 브라우저 공용 단축키는 이벤트에서 직접 필터링하여 화이트리스트만 통과시킨다.
+		// (예: Ctrl+C, Ctrl+V, Ctrl+Shift+I)
+		settings4->put_AreBrowserAcceleratorKeysEnabled(TRUE);
+		settings4->Release();
+	}
+
+	g_webviewController->add_AcceleratorKeyPressed(
+		Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
+			[](ICoreWebView2Controller*, ICoreWebView2AcceleratorKeyPressedEventArgs* args) -> HRESULT {
+				COREWEBVIEW2_KEY_EVENT_KIND kind;
+				if (FAILED(args->get_KeyEventKind(&kind)))
+					return S_OK;
+
+				if (kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+					&& kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN)
+					return S_OK;
+
+				UINT virtualKey = 0;
+				if (FAILED(args->get_VirtualKey(&virtualKey)))
+					return S_OK;
+
+				const bool ctrlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+				const bool shiftPressed = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+				bool allowShortcut = false;
+				switch (virtualKey)
+				{
+				case 'C':
+					allowShortcut = ctrlPressed && (false == shiftPressed);
+					break;
+				case 'V':
+					allowShortcut = ctrlPressed && (false == shiftPressed);
+					break;
+				case 'I':
+					allowShortcut = ctrlPressed && shiftPressed;
+					break;
+				default:
+					break;
+				}
+
+				if (allowShortcut == false)
+					args->put_Handled(TRUE);
+
+				return S_OK;
+			}).Get()
+		, nullptr
+	);
 
 	// 크기 조정
 	ResizeWebView();
